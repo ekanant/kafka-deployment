@@ -1,33 +1,61 @@
 services:
   kafka:
-    image: bitnami/kafka:4.0.0
+    image: apache/kafka:4.1.1
     hostname: kafka
     container_name: kafka
     ports:
       - "19092:19092"
     environment:
       # KRaft
-      KAFKA_CFG_NODE_ID: 0
-      KAFKA_CFG_PROCESS_ROLES: controller,broker
-      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_NODE_ID: 0
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
       # Listeners
-      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://kafka:9093,EXTERNAL://0.0.0.0:19092
-      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:SASL_PLAINTEXT,EXTERNAL:SASL_PLAINTEXT,PLAINTEXT:SASL_PLAINTEXT  # Map the protocols
-      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://127.0.0.1:19092
-      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://kafka:9093,EXTERNAL://0.0.0.0:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,EXTERNAL:SASL_PLAINTEXT,PLAINTEXT:PLAINTEXT  # Map the protocols
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://127.0.0.1:19092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       # Disable auto topic creation
-      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       # SASL
-      KAFKA_CFG_SASL_ENABLED_MECHANISMS: SCRAM-SHA-512,PLAIN
-      KAFKA_CFG_SASL_MECHANISM_INTER_BROKER_PROTOCOL: SCRAM-SHA-512
-      KAFKA_CFG_SASL_MECHANISM_CONTROLLER_PROTOCOL: PLAIN
+      KAFKA_SASL_ENABLED_MECHANISMS: SCRAM-SHA-512,PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: SCRAM-SHA-512
+      KAFKA_SASL_MECHANISM_CONTROLLER_PROTOCOL: PLAIN
 
-      # Username and password for application
-      KAFKA_CLIENT_USERS: user1,user2
-      KAFKA_CLIENT_PASSWORDS: password1,password2
+      # Point Kafka to the mounted JAAS file
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/secrets/kafka_server_jaas.conf"
+
+      # Storage
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
     volumes:
-      - ./data-docker/kafka/data:/bitnami/kafka
+      - ./data-docker/kafka/data:/var/lib/kafka/data
+      # Mount the JAAS file (read-only)
+      - ./conf/kafka_server_jaas.conf:/etc/kafka/secrets/kafka_server_jaas.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
     restart: unless-stopped
+
+  # This container creates the SCRAM user automatically
+  init-kafka:
+    image: apache/kafka:4.1.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: [ '/bin/sh', '-c' ]
+    command: |
+      "
+      echo 'Creating SCRAM user...'
+      # Wait for Kafka to be ready is handled by depends_on + healthcheck above
+      
+      # Create the user 'user1' with password 'password1'
+      /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka:9092 --alter --add-config 'SCRAM-SHA-512=[password=password1]' --entity-type users --entity-name user1
+      /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka:9092 --alter --add-config 'SCRAM-SHA-512=[password=password2]' --entity-type users --entity-name user2
+      
+      echo 'User created. Exiting.'
+      "
 
   kafka-ui:
     image: provectuslabs/kafka-ui:v0.7.2
@@ -37,8 +65,9 @@ services:
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: "kafka:9092"
-      KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL: PLAINTEXT
       KAFKA_CLUSTERS_0_PROPERTIES_SASL_MECHANISM: "SCRAM-SHA-512"
       KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG: org.apache.kafka.common.security.scram.ScramLoginModule required username="user1" password="password1";
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
