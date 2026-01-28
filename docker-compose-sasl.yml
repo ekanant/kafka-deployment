@@ -27,6 +27,8 @@ services:
 
       # Storage
       KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # Fix consumer error => no coordinator
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     volumes:
       - ./data-docker/kafka/data:/var/lib/kafka/data
       # Mount the JAAS file (read-only)

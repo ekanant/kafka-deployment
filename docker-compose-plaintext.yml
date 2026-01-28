@@ -20,6 +20,8 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       # Storage
       KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # Fix consumer error => no coordinator
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     volumes:
       - ./data-docker/kafka/data:/var/lib/kafka/data
     restart: unless-stopped
